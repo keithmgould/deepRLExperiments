@@ -59,14 +59,14 @@ class Policy:
     hidden_bias_grads = gvs[1][0]
     mu_weight_grads = gvs[2][0]
     mu_bias_grads = gvs[3][0]
-    # sigma_weight_grads = gvs[4][0]
-    # sigma_bias_grads = gvs[5][0]
+    sigma_weight_grads = gvs[4][0]
+    sigma_bias_grads = gvs[5][0]
     tf.summary.histogram("weightGrads", hidden_weight_grads, family="hidden")
     tf.summary.histogram("biasGrads", hidden_bias_grads, family="hidden")
     tf.summary.histogram("weightGrads", mu_weight_grads, family="mu")
     tf.summary.histogram("biasGrads", mu_weight_grads, family="mu")
-    # tf.summary.histogram("weightGrads", sigma_weight_grads, family="sigma")
-    # tf.summary.histogram("biasGrads", sigma_weight_grads, family="sigma")
+    tf.summary.histogram("weightGrads", sigma_weight_grads, family="sigma")
+    tf.summary.histogram("biasGrads", sigma_weight_grads, family="sigma")
 
   def tensorboard_wba_store(self, family, layer):
     weights = tf.get_default_graph().get_tensor_by_name(family + '/kernel:0')
@@ -82,20 +82,19 @@ class Policy:
     self.tensorboard_wba_store("mu", mu)
     self.mu = tf.reshape(mu,[-1])
 
-    sigma_theta = tf.get_variable(
-      "sigma_theta",[32], initializer=tf.zeros_initializer()
-    )
-    sigma = tf.reduce_sum(sigma_theta)
-    self.sigma = tf.exp(sigma)
-    tf.summary.scalar('sigma', self.sigma)
+    sigma = tf.layers.dense(hidden,1, tf.nn.softplus, name="sigma")
+    self.tensorboard_wba_store("sigma", sigma)
+    sigma = tf.sqrt(sigma)
+    self.sigma = tf.reshape(sigma,[-1])
+    self.tensorboard_scalar_store(self.sigma, "sigma")
 
+    # use mu and sigma
     return tf.distributions.Normal(self.mu, self.sigma)
 
   def select_action(self, observation):
     feed = { self.observations: [observation] }
     mu, sigma = self.session.run([self.mu, self.sigma], feed_dict=feed)
-    mu= mu[0]
-
+    mu, sigma = mu[0], sigma[0]
     action = np.random.normal(mu, sigma)
     return np.clip(action, self.lowest_action, self.highest_action)
 
@@ -113,6 +112,9 @@ class Policy:
       self.mu,
       self.sigma,
       self.probs ], feed_dict = feed)
+
+    if abs(loss) > 5:
+      pdb.set_trace()
 
     self.session.run(self.trainMe, feed_dict = feed)
 
