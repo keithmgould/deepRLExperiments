@@ -61,14 +61,10 @@ class Policy:
     hidden_bias_grads = gvs[1][0]
     mu_weight_grads = gvs[2][0]
     mu_bias_grads = gvs[3][0]
-    # sigma_weight_grads = gvs[4][0]
-    # sigma_bias_grads = gvs[5][0]
     tf.summary.histogram("weightGrads", hidden_weight_grads, family="hidden")
     tf.summary.histogram("biasGrads", hidden_bias_grads, family="hidden")
     tf.summary.histogram("weightGrads", mu_weight_grads, family="mu")
     tf.summary.histogram("biasGrads", mu_weight_grads, family="mu")
-    # tf.summary.histogram("weightGrads", sigma_weight_grads, family="sigma")
-    # tf.summary.histogram("biasGrads", sigma_weight_grads, family="sigma")
 
   def tensorboard_wba_store(self, family, layer):
     weights = tf.get_default_graph().get_tensor_by_name(family + '/kernel:0')
