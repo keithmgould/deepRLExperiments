@@ -4,10 +4,15 @@ import pdb, shutil
 import roboschool
 import tensorflow as tf
 import matplotlib.pyplot as plt
+from scipy.stats import norm
 from tensorflow.python.ops import random_ops
 
 def _initializer(shape, dtype=tf.float32, partition_info=None):
      return random_ops.random_normal(shape)
+
+def numpyToString(narray):
+  narray = narray.tolist()
+  return ','.join(['{:.2f}'.format(x) for x in narray])
 
 class Policy:
   def __init__(self, session, observation_size, lowest_action, highest_action):
@@ -25,13 +30,31 @@ class Policy:
 
     with tf.name_scope('log_probs'):
         self.log_probs = normal.log_prob(self.actions)
+        self.probs = normal.prob(self.actions) # tmp for tensorboard study
 
     with tf.name_scope('loss'):
         loss = -tf.reduce_mean(tf.multiply(self.log_probs, self.returns))
 
     self.loss = loss
-    gvs = optimizer.compute_gradients(loss)
 
+    tf.summary.scalar('loss', loss)
+    self.tensorboard_scalar_store(self.probs, "probs")
+    self.tensorboard_scalar_store(self.actions, "actions")
+    self.tensorboard_scalar_store(self.log_probs, "log_probs")
+
+
+    gvs = optimizer.compute_gradients(loss)
+    gvs = [(tf.clip_by_value(grad, -.2, .2), var) for grad, var in gvs]
+    self.tensorboard_grad_store(gvs);
+    self.trainMe = optimizer.apply_gradients(gvs)
+    self.summaries = tf.summary.merge_all()
+
+  def tensorboard_scalar_store(self, thing, family):
+    tf.summary.scalar('max', tf.reduce_max(thing), family=family)
+    tf.summary.scalar('min', tf.reduce_min(thing), family=family)
+    tf.summary.scalar('mean', tf.reduce_mean(thing), family=family)
+
+  def tensorboard_grad_store(self, gvs):
     hidden_weight_grads = gvs[0][0]
     hidden_bias_grads = gvs[1][0]
     mu_weight_grads = gvs[2][0]
@@ -45,10 +68,7 @@ class Policy:
     tf.summary.histogram("weightGrads", sigma_weight_grads, family="sigma")
     tf.summary.histogram("biasGrads", sigma_weight_grads, family="sigma")
 
-    self.trainMe = optimizer.apply_gradients(gvs)
-    self.summaries = tf.summary.merge_all()
-
-  def tensorboard_histogram_store(self, family, layer):
+  def tensorboard_wba_store(self, family, layer):
     weights = tf.get_default_graph().get_tensor_by_name(family + '/kernel:0')
     bias = tf.get_default_graph().get_tensor_by_name(family + '/bias:0')
     tf.summary.histogram("weights", weights, family=family)
@@ -57,20 +77,36 @@ class Policy:
 
   def build_graph(self):
     hidden = tf.layers.dense(self.observations, 128, tf.nn.relu, name="hidden")
-    self.tensorboard_histogram_store("hidden", hidden)
+    self.tensorboard_wba_store("hidden", hidden)
     mu = tf.layers.dense(hidden,1, tf.nn.tanh, name="mu")
-    self.tensorboard_histogram_store("mu", mu)
-    sigma_sq = tf.layers.dense(hidden,1, tf.nn.softplus, name="sigma")
-    self.tensorboard_histogram_store("sigma", sigma_sq)
+    self.tensorboard_wba_store("mu", mu)
+    self.mu = tf.reshape(mu,[-1])
 
-    sigma = tf.sqrt(sigma_sq)
-    self.flat_sigma = tf.reshape(sigma,[-1])
-    self.flat_mu = tf.reshape(mu,[-1])
-    return tf.distributions.Normal(self.flat_mu, self.flat_sigma)
+    # sigma_theta = tf.get_variable(
+      # "sigma_theta",[32], initializer=tf.zeros_initializer()
+    # )
+    # sigma = tf.reduce_sum(sigma_theta)
+    # self.sigma = tf.exp(sigma)
+
+    sigma = tf.layers.dense(hidden,1, tf.nn.softplus, name="sigma")
+    self.tensorboard_wba_store("sigma", sigma)
+    sigma = tf.sqrt(sigma)
+    self.sigma = tf.reshape(sigma,[-1])
+    self.tensorboard_scalar_store(self.sigma, "sigma")
+
+    # use mu and sigma
+    return tf.distributions.Normal(self.mu, self.sigma)
 
   def select_action(self, observation):
     feed = { self.observations: [observation] }
-    action = self.session.run(self.action, feed_dict=feed)
+    mu, sigma = self.session.run([self.mu, self.sigma], feed_dict=feed)
+    mu, sigma = mu[0], sigma[0]
+    while True:
+      action = np.random.normal(mu, sigma)
+      pdf = norm.pdf(action, mu, sigma)
+      if pdf > .001:
+        break
+      print("oops trying again")
     return np.clip(action, self.lowest_action, self.highest_action)
 
   def update_parameters(self, observations, actions, returns, ep_index):
@@ -80,13 +116,18 @@ class Policy:
       self.returns: returns,
     }
 
-    log_probs, _, summaries, loss, mus, sigmas = self.session.run([
+    log_probs, summaries, loss, mus, sigma, probs = self.session.run([
       self.log_probs,
-      self.trainMe,
       self.summaries,
       self.loss,
-      self.flat_mu,
-      self.flat_sigma], feed_dict = feed)
+      self.mu,
+      self.sigma,
+      self.probs ], feed_dict = feed)
+
+    if abs(loss) > 5:
+      pdb.set_trace()
+
+    self.session.run(self.trainMe, feed_dict = feed)
 
     return summaries, loss
 
@@ -97,6 +138,7 @@ class Policy:
 class Agent:
   def __init__(self):
     self.env = gym.make('RoboschoolInvertedPendulum-v1')
+
   def print_episode_results(self, ep_index, action_lengths, loss):
     print("Episode {0}. Steps {1}. Avg {2:.2f}. Loss {3:.2f}".format(
       ep_index,
@@ -118,7 +160,15 @@ class Agent:
         summaries, loss = policy.update_parameters(observations, actions, returns, ep_index)
         writer.add_summary(summaries, global_step=ep_index)
         action_lengths.append(len(actions))
+        avg_length = np.average(action_lengths[-10:])
+        self.log_scalar('avg_length', avg_length, ep_index, writer)
+        writer.flush()
         self.print_episode_results(ep_index, action_lengths,loss)
+
+
+  def log_scalar(self, tag, value, step, writer):
+    summary = tf.Summary(value=[tf.Summary.Value(tag=tag, simple_value=value)])
+    writer.add_summary(summary, step)
 
   def policy_rollout(self, policy):
     observation, reward, done = self.env.reset(), 0, False
@@ -127,9 +177,9 @@ class Agent:
     while not done:
       action = policy.select_action(observation)
       wrapped_action = np.array([action])
-      observation, reward, done, _ = self.env.step(wrapped_action)
       observations.append(observation)
       actions.append(action)
+      observation, reward, done, _ = self.env.step(wrapped_action)
       rewards.append(reward)
 
     return observations, actions, rewards
