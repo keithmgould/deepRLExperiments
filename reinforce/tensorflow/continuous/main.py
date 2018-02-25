@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 from scipy.stats import norm
 from tensorflow.python.ops import random_ops
 
+BUILD_TENSORBOARD = False
+
 def _initializer(shape, dtype=tf.float32, partition_info=None):
      return random_ops.random_normal(shape)
 
@@ -37,17 +39,17 @@ class Policy:
 
     self.loss = loss
 
-    tf.summary.scalar('loss', loss)
-    self.tensorboard_scalar_store(self.probs, "probs")
-    self.tensorboard_scalar_store(self.actions, "actions")
-    self.tensorboard_scalar_store(self.log_probs, "log_probs")
+    if BUILD_TENSORBOARD:
+      tf.summary.scalar('loss', loss)
+      self.tensorboard_scalar_store(self.probs, "probs")
+      self.tensorboard_scalar_store(self.actions, "actions")
+      self.tensorboard_scalar_store(self.log_probs, "log_probs")
 
 
     gvs = optimizer.compute_gradients(loss)
-    # gvs = [(tf.clip_by_value(grad, -.2, .2), var) for grad, var in gvs]
-    self.tensorboard_grad_store(gvs);
+    self.tensorboard_grad_store(gvs) if BUILD_TENSORBOARD else None
     self.trainMe = optimizer.apply_gradients(gvs)
-    self.summaries = tf.summary.merge_all()
+    self.summaries = tf.summary.merge_all() if BUILD_TENSORBOARD else tf.constant(0, dtype=tf.float32)
 
   def tensorboard_scalar_store(self, thing, family):
     tf.summary.scalar('max', tf.reduce_max(thing), family=family)
@@ -77,9 +79,9 @@ class Policy:
 
   def build_graph(self):
     hidden = tf.layers.dense(self.observations, 128, tf.nn.relu, name="hidden")
-    self.tensorboard_wba_store("hidden", hidden)
+    self.tensorboard_wba_store("hidden", hidden) if BUILD_TENSORBOARD else None
     mu = tf.layers.dense(hidden,1, tf.nn.tanh, name="mu")
-    self.tensorboard_wba_store("mu", mu)
+    self.tensorboard_wba_store("mu", mu) if BUILD_TENSORBOARD else None
     self.mu = tf.reshape(mu,[-1])
 
     sigma_theta = tf.get_variable(
@@ -87,7 +89,7 @@ class Policy:
     )
     sigma = tf.reduce_sum(sigma_theta)
     self.sigma = tf.exp(sigma)
-    tf.summary.scalar('sigma', self.sigma)
+    tf.summary.scalar('sigma', self.sigma) if BUILD_TENSORBOARD else None
 
     return tf.distributions.Normal(self.mu, self.sigma)
 
@@ -145,11 +147,11 @@ class Agent:
         returns = self.discount_rewards(rewards)
         returns = (returns - np.mean(returns)) / (np.std(returns) + 1e-10)
         summaries, loss = policy.update_parameters(observations, actions, returns, ep_index)
-        writer.add_summary(summaries, global_step=ep_index)
+        writer.add_summary(summaries, global_step=ep_index) if BUILD_TENSORBOARD else None
         action_lengths.append(len(actions))
         avg_length = np.average(action_lengths[-10:])
-        self.log_scalar('avg_length', avg_length, ep_index, writer)
-        writer.flush()
+        self.log_scalar('avg_length', avg_length, ep_index, writer) if BUILD_TENSORBOARD else None
+        writer.flush() if BUILD_TENSORBOARD else None
         self.print_episode_results(ep_index, action_lengths,loss)
 
 
