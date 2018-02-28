@@ -1,6 +1,6 @@
 import numpy as np
 import gym
-import pdb, shutil
+import pdb, shutil, time
 import roboschool
 import tensorflow as tf
 import matplotlib.pyplot as plt
@@ -168,6 +168,12 @@ class Agent:
         action_lengths.append(len(actions))
         avg_length = np.average(action_lengths[-10:])
         self.print_episode_results(ep_index, action_lengths)
+      print(action_lengths)
+      print('\a')
+      time.sleep(0.5)
+      print('\a')
+      time.sleep(0.5)
+      print('\a')
 
   def policy_rollout(self, policy):
     observation, reward, done = self.env.reset(), 0, False

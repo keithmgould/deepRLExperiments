@@ -2,6 +2,7 @@ import numpy as np
 import gym
 import pdb, shutil
 import roboschool
+import time
 import tensorflow as tf
 import matplotlib.pyplot as plt
 from scipy.stats import norm
@@ -138,7 +139,7 @@ class Agent:
       session.run(tf.global_variables_initializer())
       writer = tf.summary.FileWriter("./logs/", graph=tf.get_default_graph())
       action_lengths = []
-      for ep_index in range(5000):
+      for ep_index in range(500):
         observations, actions, rewards = self.policy_rollout(policy)
         returns = self.discount_rewards(rewards)
         returns = (returns - np.mean(returns)) / (np.std(returns) + 1e-10)
@@ -149,7 +150,12 @@ class Agent:
         self.log_scalar('avg_length', avg_length, ep_index, writer) if BUILD_TENSORBOARD else None
         writer.flush() if BUILD_TENSORBOARD else None
         self.print_episode_results(ep_index, action_lengths,loss)
-
+      print(action_lengths)
+      print('\a')
+      time.sleep(0.5)
+      print('\a')
+      time.sleep(0.5)
+      print('\a')
 
   def log_scalar(self, tag, value, step, writer):
     summary = tf.Summary(value=[tf.Summary.Value(tag=tag, simple_value=value)])
